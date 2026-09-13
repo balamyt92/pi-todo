@@ -1,5 +1,7 @@
 # pi-todo
 
+> ⚠️ **Это форк** оригинального пакета [`@juicesharp/rpiv-todo`](https://github.com/juicesharp/rpiv-mono/tree/main/packages/rpiv-todo) из монорепозитория [rpiv-mono](https://github.com/juicesharp/rpiv-mono). Полное сравнение с оригиналом — в разделе [«Что нового относительно rpiv-todo»](#что-нового-относительно-rpiv-todo) ниже.
+
 Живая панель задач над редактором для [Pi](https://github.com/badlogic/pi-mono): модель планирует работу через тул `todo`, а вы видите прогресс в виджете. Главный пункт этого форка — **виджет умеет сворачиваться в одну строку** и разворачиваться обратно по команде или горячей клавише.
 
 ```
@@ -18,14 +20,14 @@
 ### Из git
 
 ```bash
-pi install git:github.com/<user>/pi-todo@v1.0.0
+pi install git:github.com/balamyt92/pi-todo@v1.0.0
 ```
 
 Поддерживаются HTTPS и SSH:
 
 ```bash
-pi install https://github.com/<user>/pi-todo@v1.0.0
-pi install git:git@github.com:<user>/pi-todo@v1.0.0
+pi install https://github.com/balamyt92/pi-todo@v1.0.0
+pi install git:git@github.com:balamyt92/pi-todo@v1.0.0
 ```
 
 ### Из локальной папки (разработка)
