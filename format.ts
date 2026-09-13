@@ -253,5 +253,8 @@ export function formatGetLines(task: Task, state: { tasks: Task[] }): string {
 		lines.push(`  blocks: ${blocks.map((id) => `#${id}`).join(", ")}`);
 	}
 	if (task.owner) lines.push(`  owner: ${task.owner}`);
+	if (task.metadata && Object.keys(task.metadata).length) {
+		lines.push(`  metadata: ${JSON.stringify(task.metadata)}`);
+	}
 	return lines.join("\n");
 }
