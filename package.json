@@ -22,6 +22,7 @@
     "reducer.ts",
     "store.ts",
     "replay.ts",
+    "response.ts",
     "selectors.ts",
     "format.ts",
     "overlay.ts",
