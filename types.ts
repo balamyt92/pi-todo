@@ -21,7 +21,7 @@ export const TOOL_LABEL = "Todo";
 export const LIST_COMMAND_NAME = "todos";
 
 /** Слэш-команда: переключение свёрнутый/развёрнутый режим виджета. */
-export const TOGGLE_COMMAND_NAME = "todo-toggle";
+export const TOGGLE_COMMAND_NAME = "todos-toggle-widget";
 
 /**
  * Горячая клавиша переключения режима по умолчанию.

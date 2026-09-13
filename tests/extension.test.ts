@@ -112,7 +112,7 @@ describe("точка входа", () => {
 		assert.equal(typeof content, "function");
 	});
 
-	it("/todo-toggle переключает режим и не падает без задач", async () => {
+	it("/todos-toggle-widget переключает режим и не падает без задач", async () => {
 		__resetState();
 		const rec = await load();
 		const toggle = rec.commands.get(TOGGLE_COMMAND_NAME)!;

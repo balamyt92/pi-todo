@@ -2,7 +2,7 @@
  * commands.ts — слэш-команды расширения.
  *
  *   /todos        — развёрнутый список задач в чате
- *   /todo-toggle  — переключить режим виджета (или явно: expand / collapse)
+ *   /todos-toggle-widget  — переключить режим виджета (или явно: expand / collapse)
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -74,7 +74,7 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 }
 
 /**
- * `/todo-toggle [expand|collapse]`
+ * `/todos-toggle-widget [expand|collapse]`
  *
  * Без аргумента — переключить текущий режим. С аргументом — выставить явно.
  * Когда задач нет, виджет невидим, поэтому смену режима подтверждаем
