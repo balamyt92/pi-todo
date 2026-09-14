@@ -9,7 +9,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { deriveBlocks } from "./graph.ts";
 import { selectTaskSubjectById, type TodoCounts } from "./selectors.ts";
 import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskStatus } from "./types.ts";
 
@@ -240,21 +239,3 @@ export function renderTodoResult(result: { details?: unknown }, theme: Theme): T
 	return new Text(theme.fg("success", "✓"), 0, 0);
 }
 
-/** Строки `get`: описание, блокировки, владелец. */
-export function formatGetLines(task: Task, state: { tasks: Task[] }): string {
-	const blocks = deriveBlocks(state.tasks).get(task.id) ?? [];
-	const lines = [`#${task.id} [${formatStatusLabel(task.status)}] ${task.subject}`];
-	if (task.description) lines.push(`  description: ${task.description}`);
-	if (task.activeForm) lines.push(`  activeForm: ${task.activeForm}`);
-	if (task.blockedBy?.length) {
-		lines.push(`  blockedBy: ${task.blockedBy.map((id) => `#${id}`).join(", ")}`);
-	}
-	if (blocks.length) {
-		lines.push(`  blocks: ${blocks.map((id) => `#${id}`).join(", ")}`);
-	}
-	if (task.owner) lines.push(`  owner: ${task.owner}`);
-	if (task.metadata && Object.keys(task.metadata).length) {
-		lines.push(`  metadata: ${JSON.stringify(task.metadata)}`);
-	}
-	return lines.join("\n");
-}

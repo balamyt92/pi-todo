@@ -6,7 +6,7 @@
  * (после replay из ветки сессии).
  */
 
-import type { Task, TaskState } from "./types.ts";
+import type { TaskState } from "./types.ts";
 import { EMPTY_STATE } from "./types.ts";
 
 let state: TaskState = { tasks: [...EMPTY_STATE.tasks], nextId: EMPTY_STATE.nextId };
@@ -14,15 +14,6 @@ let state: TaskState = { tasks: [...EMPTY_STATE.tasks], nextId: EMPTY_STATE.next
 /** Состояние целиком. `readonly` наружу, чтобы читатели не мутировали ячейку. */
 export function getState(): TaskState {
 	return state;
-}
-
-/** Список задач без tombstone'ов — «что видно». */
-export function getTodos(): readonly Task[] {
-	return state.tasks;
-}
-
-export function getNextId(): number {
-	return state.nextId;
 }
 
 /** Публикация нового канонического состояния после редьюсера. */

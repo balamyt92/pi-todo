@@ -6,7 +6,7 @@
  * представление здесь, а не в местах отрисовки.
  */
 
-import type { Task, TaskState, TaskStatus } from "./types.ts";
+import type { Task, TaskState } from "./types.ts";
 
 /** Задачи без tombstone'ов — каноническое «что видно». */
 export function selectVisibleTasks(state: TaskState): readonly Task[] {
@@ -123,4 +123,3 @@ export function selectOverlayLayout(state: TaskState, budget: number): OverlayLa
 	return { visible, hiddenCompleted: totalCompleted, truncatedTail };
 }
 
-export const ACTIVE_STATUSES: ReadonlySet<TaskStatus> = new Set(["pending", "in_progress"]);
