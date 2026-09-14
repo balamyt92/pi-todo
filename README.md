@@ -20,14 +20,14 @@
 ### Из git
 
 ```bash
-pi install git:github.com/balamyt92/pi-todo@v1.0.0
+pi install git:github.com/balamyt92/pi-todo@v1.0.2
 ```
 
 Поддерживаются HTTPS и SSH:
 
 ```bash
-pi install https://github.com/balamyt92/pi-todo@v1.0.0
-pi install git:git@github.com:balamyt92/pi-todo@v1.0.0
+pi install https://github.com/balamyt92/pi-todo@v1.0.2
+pi install git:git@github.com:balamyt92/pi-todo@v1.0.2
 ```
 
 ### Из локальной папки (разработка)
