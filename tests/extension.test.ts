@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { __resetState } from "../store.ts";
+import { __resetState, getState } from "../store.ts";
 import { LIST_COMMAND_NAME, TOGGLE_COMMAND_NAME, TOGGLE_SHORTCUT, TOOL_NAME } from "../types.ts";
 
 type Handler = (event: any, ctx: any) => Promise<void>;
@@ -136,5 +136,73 @@ describe("точка входа", () => {
 			sessionManager: { getBranch: () => [] },
 			ui: { setWidget: () => {}, notify: () => {} },
 		});
+	});
+});
+
+describe("регрессия: спавн субагента не затирает список", () => {
+	// Сторонние расширения (@tintinweb/pi-subagents) при спавне субагента
+	// привязывают расширения к дочерней сессии и эмиттируют ВТОРОЙ session_start
+	// с reason "startup". Его ветка пуста (нет задач родителя) — живой список не
+	// должен быть затёрт.
+	const emptyCtx = {
+		hasUI: false,
+		sessionManager: { getBranch: () => [] },
+	};
+
+	it("startup + пустая ветка не затирает живой непустой список", async () => {
+		__resetState();
+		const rec = await load();
+		// Имитируем живой список из двух задач.
+		const { commitState } = await import("../store.ts");
+		commitState({
+			tasks: [
+				{ id: 1, subject: "Альфа", status: "pending" },
+				{ id: 2, subject: "Бета", status: "pending" },
+			],
+			nextId: 3,
+		});
+		await rec.handlers.get("session_start")!({ reason: "startup" }, emptyCtx);
+		assert.equal(getState().tasks.length, 2, "живой список должен сохраниться");
+	});
+
+	it("startup + пустая ветка при пустом состоянии остаётся пустым", async () => {
+		__resetState();
+		const rec = await load();
+		await rec.handlers.get("session_start")!({ reason: "startup" }, emptyCtx);
+		assert.equal(getState().tasks.length, 0);
+	});
+
+	it("new + пустая ветка сбрасывает живой список (осмысленный переход)", async () => {
+		__resetState();
+		const rec = await load();
+		const { commitState } = await import("../store.ts");
+		commitState({ tasks: [{ id: 1, subject: "Старая", status: "pending" }], nextId: 2 });
+		await rec.handlers.get("session_start")!({ reason: "new", previousSessionFile: "/x.jsonl" }, emptyCtx);
+		assert.equal(getState().tasks.length, 0, "переключение на новую сессию очищает список");
+	});
+
+	it("startup с непустой веткой применяет восстановленный список", async () => {
+		__resetState();
+		const rec = await load();
+		const branch = [
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "todo",
+					details: {
+						action: "create",
+						params: {},
+						tasks: [{ id: 1, subject: "Восстановленная", status: "pending" }],
+						nextId: 2,
+					},
+				},
+			},
+		];
+		await rec.handlers.get("session_start")!({ reason: "startup" }, {
+			hasUI: false,
+			sessionManager: { getBranch: () => branch },
+		});
+		assert.equal(getState().tasks.length, 1);
 	});
 });
