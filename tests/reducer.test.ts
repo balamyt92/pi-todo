@@ -59,6 +59,12 @@ describe("update", () => {
 		assert.equal(res.op.kind, "error");
 	});
 
+	it("blockedBy на update — ошибка (create-only)", () => {
+		const res = applyTaskMutation(stateWith("pending"), "update", { id: 1, blockedBy: [2] });
+		assert.equal(res.op.kind, "error");
+		assert.match((res.op as { message: string }).message, /create-only/);
+	});
+
 	it("metadata с null удаляет ключ", () => {
 		const start: TaskState = {
 			tasks: [{ id: 1, subject: "A", status: "pending", metadata: { a: 1, b: 2 } }],

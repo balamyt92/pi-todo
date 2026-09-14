@@ -69,6 +69,12 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			if (idx === -1) return errorResult(state, `#${params.id} not found`);
 			const current = state.tasks[idx];
 
+			// `blockedBy` — только для create; на update он молча игнорировался,
+			// что вводило модель в заблуждение. Явно просим аддитивные поля.
+			if (params.blockedBy !== undefined) {
+				return errorResult(state, "blockedBy is create-only; use addBlockedBy / removeBlockedBy on update");
+			}
+
 			const hasMutation =
 				params.subject !== undefined ||
 				params.description !== undefined ||
@@ -170,6 +176,12 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 		case "clear": {
 			const count = state.tasks.length;
 			return { state: { tasks: [], nextId: 1 }, op: { kind: "clear", count } };
+		}
+
+		default: {
+			// Достижимо только при рантайм-значении вне союза TaskAction (схема
+			// StringEnum это отсекает). Защита от падения `execute` на undefined.
+			return errorResult(state, `unknown action: ${String(action)}`);
 		}
 	}
 }
