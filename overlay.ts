@@ -21,12 +21,12 @@ import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import { formatCollapsedLine, formatOverlayTaskLine, formatStatusLabel } from "./format.ts";
 import { getState as storeGetState } from "./store.ts";
 import {
+	selectAllCompleted,
 	selectCurrentTask,
 	selectHasActive,
 	selectOverlayLayout,
 	selectShowTaskIds,
 	selectTodoCounts,
-	type TodoCounts,
 } from "./selectors.ts";
 import type { Task, TaskState } from "./types.ts";
 import { MAX_EXPANDED_LINES, WIDGET_KEY } from "./types.ts";
@@ -92,7 +92,7 @@ export class TodoOverlay {
 			return;
 		}
 
-		this.applyAutoCollapse(selectTodoCounts({ tasks: [...visible], nextId: snapshot.nextId }));
+		this.applyAutoCollapse({ tasks: [...visible], nextId: snapshot.nextId });
 		this.render();
 	}
 
@@ -127,9 +127,8 @@ export class TodoOverlay {
 	// Внутреннее
 	// -----------------------------------------------------------------------
 
-	private applyAutoCollapse(counts: TodoCounts): void {
-		const allDone = counts.total > 0 && counts.completed === counts.total;
-		if (!allDone) {
+	private applyAutoCollapse(state: TaskState): void {
+		if (!selectAllCompleted(state)) {
 			// Появилась незавершённая работа — снимаем запрет, авто-сворачивание
 			// снова сработает, когда всё закроют.
 			this.autoCollapseSuppressed = false;
@@ -233,9 +232,12 @@ export class TodoOverlay {
 
 		const lines: string[] = [heading];
 		const layout = selectOverlayLayout(state, MAX_EXPANDED_LINES - 1);
-		for (const task of layout.visible) {
-			lines.push(truncate(`${theme.fg("dim", "├─")} ${formatOverlayTaskLine(task, theme, showIds)}`));
-		}
+		const hasOverflow = layout.hiddenCompleted > 0 || layout.truncatedTail > 0;
+		layout.visible.forEach((task, i) => {
+			// Последний узел без переполнения — «└─», иначе ветка «├─».
+			const connector = !hasOverflow && i === layout.visible.length - 1 ? "└─" : "├─";
+			lines.push(truncate(`${theme.fg("dim", connector)} ${formatOverlayTaskLine(task, theme, showIds)}`));
+		});
 
 		// Что показали как выполненное — скроем на следующем ходе.
 		const newlyDisplayedCompletedTaskIds = overlayIdsOfCompleted(state.tasks).filter(
@@ -245,11 +247,7 @@ export class TodoOverlay {
 			this.completedTaskIdsPendingHide.add(taskId);
 		}
 
-		if (layout.hiddenCompleted === 0 && layout.truncatedTail === 0) {
-			const last = lines.length - 1;
-			lines[last] = lines[last].replace("├─", "└─");
-			return lines;
-		}
+		if (!hasOverflow) return lines;
 
 		const totalHidden = layout.hiddenCompleted + layout.truncatedTail;
 		const overflowParts: string[] = [];
