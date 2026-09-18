@@ -20,15 +20,26 @@
 ### Из git
 
 ```bash
-pi install git:github.com/balamyt92/pi-todo@v1.1.0
+pi install git:github.com/balamyt92/pi-todo
 ```
 
 Поддерживаются HTTPS и SSH:
 
 ```bash
-pi install https://github.com/balamyt92/pi-todo@v1.1.0
-pi install git:git@github.com:balamyt92/pi-todo@v1.1.0
+pi install https://github.com/balamyt92/pi-todo
+pi install git:git@github.com:balamyt92/pi-todo
 ```
+
+Без пина версии ставится последнее из default-ветки, и `pi update --extensions`
+(или `pi update --all`) продолжает её отслеживать. Если нужна конкретная
+версия — ставьте с тегом:
+
+```bash
+pi install git:github.com/balamyt92/pi-todo@v1.1.0
+```
+
+Запиненный ref обновления не сдвигают — для перехода на новую версию
+переналивайте на новый ref.
 
 ### Из локальной папки (разработка)
 
