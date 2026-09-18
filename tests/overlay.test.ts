@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import { TodoOverlay } from "../overlay.ts";
-import { commitState, __resetState } from "../store.ts";
+import { commitState, setUiSession, __resetState } from "../store.ts";
 import type { Task, TaskState } from "../types.ts";
 
 function plainTheme(): Theme {
@@ -48,12 +48,16 @@ function makeTasks(specs: Task["status"][]): TaskState {
 	};
 }
 
+/** Сессия, под которой тесты держат состояние (виджет читает UI-сессию). */
+const SESSION = "test-session";
+
 function overlayWith(specs: Task["status"][]) {
 	__resetState();
+	setUiSession(SESSION);
 	const { ui, getComponent, getLast } = fakeUI();
 	const overlay = new TodoOverlay();
 	overlay.setUICtx(ui);
-	commitState(makeTasks(specs));
+	commitState(SESSION, makeTasks(specs));
 	overlay.update();
 	return { overlay, getComponent, getLast };
 }
@@ -72,10 +76,11 @@ describe("режим виджета", () => {
 
 	it("в свёрнутом режиме ровно одна строка", () => {
 		__resetState();
+		setUiSession(SESSION);
 		const { ui, getComponent } = fakeUI();
 		const overlay = new TodoOverlay();
 		overlay.setUICtx(ui);
-		commitState(makeTasks(["pending", "in_progress", "completed"]));
+		commitState(SESSION, makeTasks(["pending", "in_progress", "completed"]));
 		overlay.update();
 		assert.equal(getComponent()!.render(100).length, 4, "развёрнуто: заголовок + 3 задачи");
 		overlay.setMode("collapsed");
@@ -114,11 +119,11 @@ describe("авто-сворачивание", () => {
 		assert.equal(overlay.getMode(), "collapsed");
 		overlay.setMode("expanded");
 		// новая незавершённая задача снимает «замок»
-		commitState(makeTasks(["completed", "pending"]));
+		commitState(SESSION, makeTasks(["completed", "pending"]));
 		overlay.update();
 		assert.equal(overlay.getMode(), "expanded");
 		// и на закрытии всей новой порогa снова сворачивается
-		commitState(makeTasks(["completed", "completed"]));
+		commitState(SESSION, makeTasks(["completed", "completed"]));
 		overlay.update();
 		assert.equal(overlay.getMode(), "collapsed");
 	});

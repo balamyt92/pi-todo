@@ -41,7 +41,7 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 				ctx.ui.notify(MSG_REQUIRES_UI, "error");
 				return;
 			}
-			const state = getState();
+			const state = getState(ctx.sessionManager.getSessionId());
 			const visible = selectVisibleTasks(state);
 			if (visible.length === 0) {
 				ctx.ui.notify(MSG_NO_TODOS, "info");
@@ -106,7 +106,7 @@ export function registerTodoToggleCommand(pi: ExtensionAPI, overlay: TodoOverlay
 				mode = overlay.toggle();
 			}
 
-			if (selectVisibleTasks(getState()).length === 0) {
+			if (selectVisibleTasks(getState(ctx.sessionManager.getSessionId())).length === 0) {
 				ctx.ui.notify(mode === "collapsed" ? "pi-todo: виджет свёрнут" : "pi-todo: виджет развёрнут", "info");
 			}
 		},

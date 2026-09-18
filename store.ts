@@ -1,32 +1,76 @@
 /**
- * store.ts — живая ячейка состояния модуля.
+ * store.ts — живая ячейка состояния, изолированная по сессиям.
  *
- * Всё чтение из UI (виджет, команды) идёт через `getState()`. Единственные
- * точки записи — `commitState()` (после редьюсера) и `replaceState()`
- * (после replay из ветки сессии).
+ * Субагенты (`@tintinweb/pi-subagents`) исполняются в том же процессе, что
+ * основная сессия, и модуль расширения им общий. Одна ячейка состояния на
+ * процесс означала бы, что задачи субагентов попадают в виджет основной
+ * сессии, а `clear` субагента уничтожает список через границу сессий.
+ * Поэтому состояние хранится в `Map` под ключом `sessionManager.getSessionId()`.
+ *
+ * UI (виджет, слэш-команды) читает состояние «своей» сессии через
+ * `getUiState()` — сессии, которой принадлежит TUI. Указатель на неё
+ * выставляется на `session_start` при `hasUI`.
+ *
+ * Точки записи: `commitState()` (после редьюсера), `replaceState()` (после
+ * replay из ветки сессии), `forgetSession()` (при shutdown дочерней сессии,
+ * чтобы Map не рос на каждый спавн).
  */
 
 import type { TaskState } from "./types.ts";
 import { EMPTY_STATE } from "./types.ts";
 
-let state: TaskState = { tasks: [...EMPTY_STATE.tasks], nextId: EMPTY_STATE.nextId };
+const sessions = new Map<string, TaskState>();
 
-/** Состояние целиком. `readonly` наружу, чтобы читатели не мутировали ячейку. */
-export function getState(): TaskState {
-	return state;
+/** Сессия, которой принадлежит UI (основная TUI-сессия). */
+let uiSessionId: string | undefined;
+
+function emptyState(): TaskState {
+	return { tasks: [...EMPTY_STATE.tasks], nextId: EMPTY_STATE.nextId };
 }
 
-/** Публикация нового канонического состояния после редьюсера. */
-export function commitState(next: TaskState): void {
-	state = next;
+/**
+ * Состояние целиком для данной сессии. `readonly` наружу, чтобы читатели не
+ * мутировали ячейку. Для неизвестной сессии — пустой список.
+ */
+export function getState(sessionId: string): TaskState {
+	return sessions.get(sessionId) ?? emptyState();
+}
+
+/** Публикация нового канонического состояния сессии после редьюсера. */
+export function commitState(sessionId: string, next: TaskState): void {
+	sessions.set(sessionId, next);
 }
 
 /** Замена состояния целиком — используется replay'ем на старте/компакте сессии. */
-export function replaceState(next: TaskState): void {
-	state = next;
+export function replaceState(sessionId: string, next: TaskState): void {
+	sessions.set(sessionId, next);
 }
 
-/** Полный сброс (тесты, `clear`). */
+/** Идентификатор UI-сессии (та, чей список показывает виджет). */
+export function getUiSessionId(): string | undefined {
+	return uiSessionId;
+}
+
+/** Запомнить UI-сессию — вызывается на `session_start` с `hasUI`. */
+export function setUiSession(sessionId: string): void {
+	uiSessionId = sessionId;
+}
+
+/**
+ * Состояние UI-сессии — что показывают виджет и `/todos`.
+ * Пока UI-сессия не выбрана, пустой список.
+ */
+export function getUiState(): TaskState {
+	return uiSessionId === undefined ? emptyState() : getState(uiSessionId);
+}
+
+/** Забыть состояние сессии (shutdown дочерней сессии — чтобы Map не рос). */
+export function forgetSession(sessionId: string): void {
+	sessions.delete(sessionId);
+}
+
+/** Полный сброс (тесты). */
 export function __resetState(): void {
-	state = { tasks: [...EMPTY_STATE.tasks], nextId: EMPTY_STATE.nextId };
+	sessions.clear();
+	uiSessionId = undefined;
 }

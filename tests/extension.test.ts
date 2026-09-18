@@ -1,18 +1,23 @@
 /**
  * Смоук-тест точки входа: проверяем, что расширение регистрирует ровно то,
  * что обещает, и что обработчики событий отрабатывают без падения.
+ *
+ * Плюс регрессия на изоляцию состояний по сессиям: субагенты
+ * (`@tintinweb/pi-subagents`) исполняются в том же процессе и не должны
+ * влиять на состояние UI-сессии.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { __resetState, getState } from "../store.ts";
+import { __resetState, commitState, getState, getUiSessionId, getUiState } from "../store.ts";
 import { LIST_COMMAND_NAME, TOGGLE_COMMAND_NAME, TOGGLE_SHORTCUT, TOOL_NAME } from "../types.ts";
 
 type Handler = (event: any, ctx: any) => Promise<void>;
 
 interface Recorded {
 	tools: string[];
+	toolDefs: Map<string, any>;
 	commands: Map<string, any>;
 	shortcuts: Array<{ key: string; handler: (ctx: any) => Promise<void> }>;
 	handlers: Map<string, Handler>;
@@ -21,6 +26,7 @@ interface Recorded {
 function fakePi(): { pi: ExtensionAPI; rec: Recorded } {
 	const rec: Recorded = {
 		tools: [],
+		toolDefs: new Map(),
 		commands: new Map(),
 		shortcuts: [],
 		handlers: new Map(),
@@ -28,6 +34,7 @@ function fakePi(): { pi: ExtensionAPI; rec: Recorded } {
 	const pi = {
 		registerTool(def: { name: string }) {
 			rec.tools.push(def.name);
+			rec.toolDefs.set(def.name, def);
 		},
 		registerCommand(name: string, opts: any) {
 			rec.commands.set(name, opts);
@@ -40,6 +47,40 @@ function fakePi(): { pi: ExtensionAPI; rec: Recorded } {
 		},
 	} as unknown as ExtensionAPI;
 	return { pi, rec };
+}
+
+/** Фейковый контекст сессии с заданным id, веткой и наличием UI. */
+function fakeSession(sessionId: string, branch: unknown[] = [], hasUI = false) {
+	const notices: string[] = [];
+	const ctx = {
+		hasUI,
+		sessionManager: {
+			getSessionId: () => sessionId,
+			getBranch: () => branch,
+		},
+		ui: {
+			setWidget: (_key: string, _content: unknown, _opts?: unknown) => {},
+			notify: (m: string) => notices.push(m),
+		},
+	};
+	return { ctx, notices };
+}
+
+/** Запись `todo`-toolResult в ветке сессии. */
+function todoEntry(id: number, subject: string, status: string, nextId = id + 1) {
+	return {
+		type: "message",
+		message: {
+			role: "toolResult",
+			toolName: "todo",
+			details: {
+				action: "create",
+				params: {},
+				tasks: [{ id, subject, status }],
+				nextId,
+			},
+		},
+	};
 }
 
 async function load() {
@@ -73,31 +114,19 @@ describe("точка входа", () => {
 
 	it("session_start без UI не роняет расширение", async () => {
 		const rec = await load();
-		const handler = rec.handlers.get("session_start")!;
-		await handler({}, { hasUI: false, sessionManager: { getBranch: () => [] } });
+		await rec.handlers.get("session_start")!({}, fakeSession("s1").ctx);
 	});
 
 	it("session_start с UI восстанавливает состояние из ветки", async () => {
+		__resetState();
 		const rec = await load();
-		const branch = [
-			{
-				type: "message",
-				message: {
-					role: "toolResult",
-					toolName: "todo",
-					details: {
-						action: "create",
-						params: {},
-						tasks: [{ id: 1, subject: "Восстановленная", status: "completed" }],
-						nextId: 2,
-					},
-				},
-			},
-		];
 		const widget: unknown[] = [];
 		const ctx = {
 			hasUI: true,
-			sessionManager: { getBranch: () => branch },
+			sessionManager: {
+				getSessionId: () => "main",
+				getBranch: () => [todoEntry(1, "Восстановленная задача", "completed")],
+			},
 			ui: {
 				setWidget: (_key: string, content: unknown) => {
 					widget.push(content);
@@ -110,18 +139,14 @@ describe("точка входа", () => {
 		assert.ok(widget.length > 0, "виджет должен быть установлен");
 		const content = widget[widget.length - 1];
 		assert.equal(typeof content, "function");
+		assert.equal(getUiSessionId(), "main");
 	});
 
 	it("/todos-toggle-widget переключает режим и не падает без задач", async () => {
 		__resetState();
 		const rec = await load();
 		const toggle = rec.commands.get(TOGGLE_COMMAND_NAME)!;
-		const notices: string[] = [];
-		const ctx = {
-			hasUI: true,
-			sessionManager: { getBranch: () => [] },
-			ui: { setWidget: () => {}, notify: (m: string) => notices.push(m) },
-		};
+		const { ctx, notices } = fakeSession("main", [], true);
 		await toggle.handler("", ctx);
 		assert.ok(notices.length > 0, "без задач должно быть уведомление");
 		await toggle.handler("expand", ctx);
@@ -131,78 +156,130 @@ describe("точка входа", () => {
 	it("хоткей переключает режим", async () => {
 		const rec = await load();
 		const shortcut = rec.shortcuts[0]!;
-		await shortcut.handler({
-			hasUI: true,
-			sessionManager: { getBranch: () => [] },
-			ui: { setWidget: () => {}, notify: () => {} },
-		});
+		await shortcut.handler(fakeSession("main", [], true).ctx);
 	});
 });
 
-describe("регрессия: спавн субагента не затирает список", () => {
-	// Сторонние расширения (@tintinweb/pi-subagents) при спавне субагента
-	// привязывают расширения к дочерней сессии и эмиттируют ВТОРОЙ session_start
-	// с reason "startup". Его ветка пуста (нет задач родителя) — живой список не
-	// должен быть затёрт.
-	const emptyCtx = {
-		hasUI: false,
-		sessionManager: { getBranch: () => [] },
-	};
-
-	it("startup + пустая ветка не затирает живой непустой список", async () => {
+describe("регрессия: изоляция состояний по сессиям (субагенты)", () => {
+	it("session_start дочерней сессии не трогает UI-состояние родителя", async () => {
 		__resetState();
 		const rec = await load();
-		// Имитируем живой список из двух задач.
-		const { commitState } = await import("../store.ts");
-		commitState({
-			tasks: [
-				{ id: 1, subject: "Альфа", status: "pending" },
-				{ id: 2, subject: "Бета", status: "pending" },
-			],
-			nextId: 3,
-		});
-		await rec.handlers.get("session_start")!({ reason: "startup" }, emptyCtx);
-		assert.equal(getState().tasks.length, 2, "живой список должен сохраниться");
+		const parent = fakeSession("parent", [todoEntry(1, "Родительская задача", "pending")], true);
+		await rec.handlers.get("session_start")!({ reason: "startup" }, parent.ctx);
+		assert.equal(getUiSessionId(), "parent");
+		assert.equal(getUiState().tasks.length, 1);
+
+		// Спавн субагента: дочерняя сессия с пустой веткой и без UI.
+		await rec.handlers.get("session_start")!({ reason: "startup" }, fakeSession("child-1").ctx);
+
+		assert.equal(getUiState().tasks.length, 1, "UI-список не должен измениться");
+		assert.equal(getUiSessionId(), "parent", "UI-сессия осталась родительской");
+		assert.equal(getState("child-1").tasks.length, 0, "у дочерней сессии свой пустой список");
 	});
 
-	it("startup + пустая ветка при пустом состоянии остаётся пустым", async () => {
+	it("вызов todo субагентом изолирован: у каждой сессии свой список", async () => {
 		__resetState();
 		const rec = await load();
-		await rec.handlers.get("session_start")!({ reason: "startup" }, emptyCtx);
-		assert.equal(getState().tasks.length, 0);
+		const parent = fakeSession("parent", [], true);
+		await rec.handlers.get("session_start")!({ reason: "startup" }, parent.ctx);
+		const tool = rec.toolDefs.get(TOOL_NAME)!;
+
+		await tool.execute(
+			"tc1",
+			{ action: "create", subject: "Задача субагента" },
+			undefined,
+			undefined,
+			fakeSession("child").ctx,
+		);
+		await tool.execute(
+			"tc2",
+			{ action: "create", subject: "Задача родителя" },
+			undefined,
+			undefined,
+			parent.ctx,
+		);
+
+		assert.equal(getState("child").tasks.length, 1);
+		assert.equal(getUiState().tasks.length, 1);
+		assert.equal(getUiState().tasks[0]!.subject, "Задача родителя");
 	});
 
-	it("new + пустая ветка сбрасывает живой список (осмысленный переход)", async () => {
+	it("clear субагента не уничтожает список родителя", async () => {
 		__resetState();
 		const rec = await load();
-		const { commitState } = await import("../store.ts");
-		commitState({ tasks: [{ id: 1, subject: "Старая", status: "pending" }], nextId: 2 });
-		await rec.handlers.get("session_start")!({ reason: "new", previousSessionFile: "/x.jsonl" }, emptyCtx);
-		assert.equal(getState().tasks.length, 0, "переключение на новую сессию очищает список");
+		const parent = fakeSession("parent", [], true);
+		await rec.handlers.get("session_start")!({ reason: "startup" }, parent.ctx);
+		const tool = rec.toolDefs.get(TOOL_NAME)!;
+
+		await tool.execute(
+			"tc1",
+			{ action: "create", subject: "Задача родителя" },
+			undefined,
+			undefined,
+			parent.ctx,
+		);
+		await tool.execute(
+			"tc2",
+			{ action: "create", subject: "Задача субагента" },
+			undefined,
+			undefined,
+			fakeSession("child").ctx,
+		);
+		await tool.execute("tc3", { action: "clear" }, undefined, undefined, fakeSession("child").ctx);
+
+		assert.equal(getState("child").tasks.length, 0);
+		assert.equal(getUiState().tasks.length, 1, "список родителя цел после clear у ребёнка");
+	});
+
+	it("shutdown дочерней сессии удаляет её ключ из store", async () => {
+		__resetState();
+		const rec = await load();
+		const parent = fakeSession("parent", [], true);
+		await rec.handlers.get("session_start")!({ reason: "startup" }, parent.ctx);
+		commitState("child", { tasks: [{ id: 1, subject: "Хвост", status: "pending" }], nextId: 2 });
+
+		await rec.handlers.get("session_shutdown")!({}, fakeSession("child").ctx);
+
+		assert.equal(getState("child").tasks.length, 0, "ключ дочерней сессии удалён");
+		assert.equal(getUiSessionId(), "parent", "UI родителя не удалён");
+	});
+
+	it("переход на новую сессию (reason new) переключает UI на её пустой список", async () => {
+		__resetState();
+		const rec = await load();
+		const old = fakeSession("old", [], true);
+		await rec.handlers.get("session_start")!({ reason: "startup" }, old.ctx);
+		commitState("old", { tasks: [{ id: 1, subject: "Старая", status: "pending" }], nextId: 2 });
+
+		await rec.handlers.get("session_start")!(
+			{ reason: "new", previousSessionFile: "/x.jsonl" },
+			fakeSession("fresh", [], true).ctx,
+		);
+
+		assert.equal(getUiSessionId(), "fresh");
+		assert.equal(getUiState().tasks.length, 0, "переключение на новую сессию очищает видимый список");
+	});
+
+	it("компакция с пустой веткой не затирает живой список той же сессии", async () => {
+		__resetState();
+		const rec = await load();
+		const main = fakeSession("main", [], true);
+		await rec.handlers.get("session_start")!({ reason: "startup" }, main.ctx);
+		commitState("main", { tasks: [{ id: 1, subject: "Живая задача", status: "pending" }], nextId: 2 });
+
+		// После компакции ветка пуста (запись `todo` ушла в сводку).
+		await rec.handlers.get("session_compact")!({}, fakeSession("main", [], true).ctx);
+
+		assert.equal(getUiState().tasks.length, 1, "живой список сохранён при пустом replay");
 	});
 
 	it("startup с непустой веткой применяет восстановленный список", async () => {
 		__resetState();
 		const rec = await load();
-		const branch = [
-			{
-				type: "message",
-				message: {
-					role: "toolResult",
-					toolName: "todo",
-					details: {
-						action: "create",
-						params: {},
-						tasks: [{ id: 1, subject: "Восстановленная", status: "pending" }],
-						nextId: 2,
-					},
-				},
-			},
-		];
-		await rec.handlers.get("session_start")!({ reason: "startup" }, {
-			hasUI: false,
-			sessionManager: { getBranch: () => branch },
-		});
-		assert.equal(getState().tasks.length, 1);
+		await rec.handlers.get("session_start")!(
+			{ reason: "startup" },
+			fakeSession("resumed", [todoEntry(1, "Восстановленная", "pending")], true).ctx,
+		);
+		assert.equal(getUiState().tasks.length, 1);
 	});
 });

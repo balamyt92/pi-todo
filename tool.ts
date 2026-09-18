@@ -9,7 +9,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { renderTodoCall, renderTodoResult } from "./format.ts";
 import { applyTaskMutation } from "./reducer.ts";
 import { buildToolResult } from "./response.ts";
-import { commitState, getState } from "./store.ts";
+import { commitState, getState, getUiState } from "./store.ts";
 import { TOOL_LABEL, TOOL_NAME, TodoParamsSchema, type TaskMutationParams } from "./types.ts";
 
 export const DEFAULT_PROMPT_SNIPPET = "Manage a task list to track multi-step progress";
@@ -34,15 +34,18 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		promptGuidelines: DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
 
-		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const typed = params as TaskMutationParams;
-			const result = applyTaskMutation(getState(), typed.action as never, typed);
-			commitState(result.state);
+			// Состояние изолировано по сессиям: субагент в том же процессе мутирует
+			// СВОЙ список и не видит/не трогает список основной TUI-сессии.
+			const sessionId = ctx.sessionManager.getSessionId();
+			const result = applyTaskMutation(getState(sessionId), typed.action as never, typed);
+			commitState(sessionId, result.state);
 			return buildToolResult(typed.action as never, typed, result.state, result.op);
 		},
 
 		renderCall(args, theme, _context) {
-			return renderTodoCall(args as TaskMutationParams & { action: never }, theme, getState());
+			return renderTodoCall(args as TaskMutationParams & { action: never }, theme, getUiState());
 		},
 
 		renderResult(result, _opts, theme, _context) {

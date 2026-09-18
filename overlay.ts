@@ -12,14 +12,15 @@
  * в одну строку. Если пользователь после этого развернул вручную — обратно её
  * не заставляем (до следующего появления незавершённых задач).
  *
- * Читает состояние через `getState()` в момент отрисовки. НИКОГДА не делает
- * replay из `tool_execution_end` — ветка там ещё устаревшая.
+ * Читает состояние UI-сессии через `getUiState()` в момент отрисовки —
+ * задачи субагентов в него не попадают (изоляция по сессиям, см. `store.ts`).
+ * НИКОГДА не делает replay из `tool_execution_end` — ветка там ещё устаревшая.
  */
 
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import { formatCollapsedLine, formatOverlayTaskLine, formatStatusLabel } from "./format.ts";
-import { getState as storeGetState } from "./store.ts";
+import { getUiState } from "./store.ts";
 import {
 	selectAllCompleted,
 	selectCurrentTask,
@@ -172,7 +173,7 @@ export class TodoOverlay {
 	 * откатилось назад (пересоздание id), дисплейная история невалидна.
 	 */
 	private getSnapshot(): TaskState {
-		const state = storeGetState();
+		const state = getUiState();
 		if (this.lastNextId !== undefined && state.nextId < this.lastNextId) {
 			this.completedTaskIdsPendingHide.clear();
 			this.hiddenCompletedTaskIds.clear();

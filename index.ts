@@ -6,38 +6,33 @@
  *
  * Виджет создаётся сразу (конструктор UI не требует), контекст UI получает на
  * session_start. Режим хранится только в памяти этой сессии.
+ *
+ * Изоляция по сессиям. Субагенты (`@tintinweb/pi-subagents`) спавнятся в том
+ * же процессе и привязывают этот же модуль расширения: `bindExtensions()`
+ * эмиттирует `session_start` для дочерней сессии. Состояние хранится под
+ * ключом `sessionManager.getSessionId()` (см. `store.ts`), поэтому дочерняя
+ * сессия проигрывает СВОЮ ветку в СВОЙ ключ и живой список основной
+ * сессии не трогает. Прежний гард `shouldPreserveLiveList` стал ненужен:
+ * «чужой» session_start теперь по определению пишет в чужой ключ.
+ *
+ * Все UI-операции (перерисовка виджета, сброс дисплейного состояния)
+ * выполняются только для событий UI-сессии — события субагентов не должны
+ * дёргать виджет основной сессии.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerTodoCommands } from "./commands.ts";
 import { TodoOverlay } from "./overlay.ts";
 import { replayFromBranch } from "./replay.ts";
-import { getState, replaceState } from "./store.ts";
+import {
+	forgetSession,
+	getState,
+	getUiSessionId,
+	replaceState,
+	setUiSession,
+} from "./store.ts";
 import { registerTodoTool } from "./tool.ts";
-import type { TaskState } from "./types.ts";
 import { TOGGLE_SHORTCUT, TOOL_NAME } from "./types.ts";
-
-/**
- * Пустой replay не должен затирать уже живой список.
- *
- * `replayFromBranch()` перечитывает задачи из записей тула `todo` в ветке. Если
- * в ветке этих записей нет, replay возвращает пустое состояние. Слепая запись
- * такого пустого результата стирает видимый список у пользователя. Это случается,
- * когда сторонние расширения эмиттируют «чужой» `session_start`:
- *
- *   `@tintinweb/pi-subagents` при спавне субагента строит дочернюю сессию и
- *   вызывает `bindExtensions()`, из-за чего В РОДИТЕЛЬСКОМ ПРОЦЕССЕ срабатывает
- *   второй `session_start` с тем же `reason: "startup"`. Ветка дочерней сессии
- *   задач родителя не содержит → пустой replay → затирание списка.
- *
- * Сохраняем текущий список, когда replay пуст, но у нас есть живой список, И это
- * не осмысленный переход пользователя. Для `new`/`resume`/`fork` пустая ветка
- * означает «переключились на сессию без задач» — там применяем пустое состояние.
- */
-function shouldPreserveLiveList(reason: string | undefined, replayed: TaskState): boolean {
-	const genuineTransition = reason === "new" || reason === "resume" || reason === "fork";
-	return !genuineTransition && replayed.tasks.length === 0 && getState().tasks.length > 0;
-}
 
 export default function (pi: ExtensionAPI) {
 	const overlay = new TodoOverlay();
@@ -55,14 +50,11 @@ export default function (pi: ExtensionAPI) {
 
 	// --- Жизненный цикл сессии --------------------------------------------
 
-	pi.on("session_start", async (event, ctx) => {
-		const replayed = replayFromBranch(ctx);
-		// Не затираем живой список «чужим» пустым session_start (boot / дочерняя
-		// сессия субагента) — см. shouldPreserveLiveList.
-		if (!shouldPreserveLiveList(event.reason, replayed)) {
-			replaceState(replayed);
-		}
+	pi.on("session_start", async (_event, ctx) => {
+		const sid = ctx.sessionManager.getSessionId();
+		replaceState(sid, replayFromBranch(ctx));
 		if (ctx.hasUI) {
+			setUiSession(sid);
 			overlay.setUICtx(ctx.ui);
 			// Новая сессия — дефолтный режим (развёрнутый).
 			overlay.reset();
@@ -71,37 +63,53 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_compact", async (_event, ctx) => {
+		const sid = ctx.sessionManager.getSessionId();
 		const replayed = replayFromBranch(ctx);
 		// Компакция — та же сессия: если записи `todo` попали в сводку и исчезли
-		// из ветки, пустой replay не должен терять видимый список.
-		if (!shouldPreserveLiveList(undefined, replayed)) {
-			replaceState(replayed);
+		// из ветки, пустой replay не должен терять живой список.
+		if (!(replayed.tasks.length === 0 && getState(sid).tasks.length > 0)) {
+			replaceState(sid, replayed);
 		}
-		overlay.reset();
-		overlay.update();
+		if (sid === getUiSessionId()) {
+			overlay.reset();
+			overlay.update();
+		}
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
-		replaceState(replayFromBranch(ctx));
-		overlay.reset();
-		overlay.update();
+		const sid = ctx.sessionManager.getSessionId();
+		replaceState(sid, replayFromBranch(ctx));
+		if (sid === getUiSessionId()) {
+			overlay.reset();
+			overlay.update();
+		}
 	});
 
-	pi.on("session_shutdown", async () => {
-		overlay.dispose();
+	pi.on("session_shutdown", async (_event, ctx) => {
+		const sid = ctx.sessionManager.getSessionId();
+		if (sid === getUiSessionId()) {
+			overlay.dispose();
+			return;
+		}
+		// Дочерняя сессия завершилась — её состояние больше не нужно,
+		// иначе Map растёт на каждый спавн субагента.
+		forgetSession(sid);
 	});
 
 	// --- Обновление виджета по ходу работы агента -------------------------
 
 	// Читаем состояние в момент события; replay здесь НЕ делаем — ветка после
-	// tool_execution_end ещё не содержит свежей записи.
-	pi.on("tool_execution_end", async (event) => {
+	// tool_execution_end ещё не содержит свежей записи. События субагентов
+	// игнорируем: виджет принадлежит UI-сессии.
+	pi.on("tool_execution_end", async (event, ctx) => {
 		if (event.toolName !== TOOL_NAME || event.isError) return;
+		if (ctx.sessionManager.getSessionId() !== getUiSessionId()) return;
 		overlay.update();
 	});
 
 	// Новый ход агента — скрываем выполненные задачи прошлого хода.
-	pi.on("agent_start", async () => {
+	pi.on("agent_start", async (_event, ctx) => {
+		if (ctx.sessionManager.getSessionId() !== getUiSessionId()) return;
 		overlay.hideCompletedTasksFromPreviousTurn();
 	});
 }
