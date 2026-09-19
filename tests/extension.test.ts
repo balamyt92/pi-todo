@@ -244,6 +244,20 @@ describe("регрессия: изоляция состояний по сесс�
 		assert.equal(getUiSessionId(), "parent", "UI родителя не удалён");
 	});
 
+	it("shutdown UI-сессии удаляет её ключ и сбрасывает указатель", async () => {
+		__resetState();
+		const rec = await load();
+		const main = fakeSession("main", [], true);
+		await rec.handlers.get("session_start")!({ reason: "startup" }, main.ctx);
+		commitState("main", { tasks: [{ id: 1, subject: "Живая", status: "pending" }], nextId: 2 });
+		assert.equal(getUiSessionId(), "main");
+
+		await rec.handlers.get("session_shutdown")!({}, fakeSession("main", [], true).ctx);
+
+		assert.equal(getUiSessionId(), undefined, "указатель UI-сессии сброшен");
+		assert.equal(getState("main").tasks.length, 0, "ключ UI-сессии удалён из store");
+	});
+
 	it("переход на новую сессию (reason new) переключает UI на её пустой список", async () => {
 		__resetState();
 		const rec = await load();

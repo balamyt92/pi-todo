@@ -1,6 +1,6 @@
 {
   "name": "pi-todo",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Живой todo-виджет для Pi: панель задач над редактором со свёрнутым и развёрнутым режимами (/todos-toggle-widget)",
   "keywords": [
     "pi-package",

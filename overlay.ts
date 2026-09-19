@@ -53,6 +53,13 @@ export class TodoOverlay {
 	private hiddenCompletedTaskIds = new Set<number>();
 	private lastNextId: number | undefined;
 
+	/**
+	 * Граница хода. Скрывать выполненные прошлого хода разрешено только когда
+	 * тот ход завершился (`agent_settled`). На ретрае внутри хода `agent_start`
+	 * повторяется без settle — иначе ещё живые задачи исчезли бы посреди хода.
+	 */
+	private turnSettled = true;
+
 	setUICtx(ctx: ExtensionUIContext): void {
 		// Сверяем по идентичности: повторные session_start идемпотентны, а при
 		// смене контекста (/reload) сбрасываемся, чтобы update() зарегистрировал
@@ -85,6 +92,7 @@ export class TodoOverlay {
 
 	update(): void {
 		if (!this.uiCtx) return;
+		this.maintainDisplayState();
 		const snapshot = this.getSnapshot();
 		const visible = this.selectOverlayTasks(snapshot);
 
@@ -104,10 +112,26 @@ export class TodoOverlay {
 		this.completedTaskIdsPendingHide.clear();
 		this.hiddenCompletedTaskIds.clear();
 		this.lastNextId = undefined;
+		this.turnSettled = true;
 	}
 
-	/** Скрыть выполненные задачи предыдущего хода (вызывается на agent_start). */
-	hideCompletedTasksFromPreviousTurn(): void {
+	/**
+	 * Начало хода: скрыть выполненные прошлого хода, но только если тот ход
+	 * завершился. Повторный `agent_start` (ретрай) скрытия не делает.
+	 */
+	beginTurn(): void {
+		if (!this.turnSettled) return;
+		this.hideCompletedTasksFromPreviousTurn();
+		this.turnSettled = false;
+	}
+
+	/** Конец хода (`agent_settled`): вооружаем скрытие к следующему ходу. */
+	endTurn(): void {
+		this.turnSettled = true;
+	}
+
+	/** Скрыть выполненные задачи предыдущего хода. */
+	private hideCompletedTasksFromPreviousTurn(): void {
 		if (this.completedTaskIdsPendingHide.size === 0) return;
 		for (const taskId of this.completedTaskIdsPendingHide) {
 			this.hiddenCompletedTaskIds.add(taskId);
@@ -172,7 +196,19 @@ export class TodoOverlay {
 	 * Снимок состояния + самоочищение дисплейных множеств: если состояние
 	 * откатилось назад (пересоздание id), дисплейная история невалидна.
 	 */
+	/** Чистый снимок UI-состояния для отрисовки. Без мутаций. */
 	private getSnapshot(): TaskState {
+		const state = getUiState();
+		return { tasks: [...state.tasks], nextId: state.nextId };
+	}
+
+	/**
+	 * Обслуживание дисплейных множеств перед перерисовкой: откат `nextId`
+	 * (пересоздание списка) обнуляет историю; выполненные, которых больше нет
+	 * в состоянии, убираются из множеств скрытия. Вызывается только из
+	 * `update()`, чтобы горячий путь `renderWidget()` оставался чистым.
+	 */
+	private maintainDisplayState(): void {
 		const state = getUiState();
 		if (this.lastNextId !== undefined && state.nextId < this.lastNextId) {
 			this.completedTaskIdsPendingHide.clear();
@@ -189,7 +225,6 @@ export class TodoOverlay {
 		for (const taskId of this.hiddenCompletedTaskIds) {
 			if (!completedTaskIds.has(taskId)) this.hiddenCompletedTaskIds.delete(taskId);
 		}
-		return { tasks: [...state.tasks], nextId: state.nextId };
 	}
 
 	private selectOverlayTasks(snapshot: TaskState): readonly Task[] {
@@ -218,6 +253,18 @@ export class TodoOverlay {
 		return [truncateToWidth(line, width, "…")];
 	}
 
+	/**
+	 * Запомнить выполненные задачи, показанные в этом ходе, чтобы скрыть их на
+	 * следующем. Побочный эффект отрисовки вынесен из тела render в явный метод.
+	 */
+	private trackDisplayedCompleted(tasks: readonly Task[]): void {
+		for (const taskId of overlayIdsOfCompleted(tasks)) {
+			if (!this.completedTaskIdsPendingHide.has(taskId) && !this.hiddenCompletedTaskIds.has(taskId)) {
+				this.completedTaskIdsPendingHide.add(taskId);
+			}
+		}
+	}
+
 	/** Развёрнутый режим: заголовок + список + сводка о скрытом. */
 	private renderExpanded(theme: Theme, width: number, state: TaskState): string[] {
 		const truncate = (line: string): string => truncateToWidth(line, width, "…");
@@ -241,12 +288,7 @@ export class TodoOverlay {
 		});
 
 		// Что показали как выполненное — скроем на следующем ходе.
-		const newlyDisplayedCompletedTaskIds = overlayIdsOfCompleted(state.tasks).filter(
-			(taskId) => !this.completedTaskIdsPendingHide.has(taskId) && !this.hiddenCompletedTaskIds.has(taskId),
-		);
-		for (const taskId of newlyDisplayedCompletedTaskIds) {
-			this.completedTaskIdsPendingHide.add(taskId);
-		}
+		this.trackDisplayedCompleted(state.tasks);
 
 		if (!hasOverflow) return lines;
 

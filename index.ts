@@ -25,6 +25,7 @@ import { registerTodoCommands } from "./commands.ts";
 import { TodoOverlay } from "./overlay.ts";
 import { replayFromBranch } from "./replay.ts";
 import {
+	clearUiSessionIfMatches,
 	forgetSession,
 	getState,
 	getUiSessionId,
@@ -89,6 +90,11 @@ export default function (pi: ExtensionAPI) {
 		const sid = ctx.sessionManager.getSessionId();
 		if (sid === getUiSessionId()) {
 			overlay.dispose();
+			// Не оставляем сиротную запись UI-сессии в Map на время жизни
+			// процесса: состояние персистентно в ветке и вернётся replay'ем на
+			// следующем session_start.
+			forgetSession(sid);
+			clearUiSessionIfMatches(sid);
 			return;
 		}
 		// Дочерняя сессия завершилась — её состояние больше не нужно,
@@ -108,9 +114,17 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Новый ход агента — скрываем выполненные задачи прошлого хода.
+	// beginTurn скрывает только если предыдущий ход завершился (agent_settled),
+	// поэтому ретрай внутри хода не прячет ещё живые задачи.
 	pi.on("agent_start", async (_event, ctx) => {
 		if (ctx.sessionManager.getSessionId() !== getUiSessionId()) return;
-		overlay.hideCompletedTasksFromPreviousTurn();
+		overlay.beginTurn();
+	});
+
+	// Ход устаканился — вооружаем скрытие выполненных к следующему ходу.
+	pi.on("agent_settled", async (_event, ctx) => {
+		if (ctx.sessionManager.getSessionId() !== getUiSessionId()) return;
+		overlay.endTurn();
 	});
 }
 

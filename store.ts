@@ -69,6 +69,15 @@ export function forgetSession(sessionId: string): void {
 	sessions.delete(sessionId);
 }
 
+/**
+ * Сбросить указатель UI-сессии, если он всё ещё указывает на `sessionId`.
+ * Нужен при shutdown UI-сессии, чтобы не оставить висячий указатель на
+ * уже удалённую запись до следующего `session_start`.
+ */
+export function clearUiSessionIfMatches(sessionId: string): void {
+	if (uiSessionId === sessionId) uiSessionId = undefined;
+}
+
 /** Полный сброс (тесты). */
 export function __resetState(): void {
 	sessions.clear();

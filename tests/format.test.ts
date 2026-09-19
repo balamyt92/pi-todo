@@ -11,6 +11,7 @@ import {
 	formatOverlayTaskLine,
 	progressPercent,
 	renderProgressBar,
+	renderTodoResult,
 	taskDisplayTitle,
 } from "../format.ts";
 import type { Task } from "../types.ts";
@@ -121,5 +122,37 @@ describe("formatOverlayTaskLine", () => {
 	it("in_progress показывает activeForm в скобках", () => {
 		const t: Task = { id: 1, subject: "A", status: "in_progress", activeForm: "делаю A" };
 		assert.equal(formatOverlayTaskLine(t, plainTheme(), false), "◐ A (делаю A)");
+	});
+});
+
+describe("renderTodoResult", () => {
+	it("ошибка редьюсера → глиф ✗ и текст ошибки, а не целевой статус", () => {
+		const result = {
+			details: {
+				action: "update",
+				params: { id: 1, status: "in_progress" },
+				tasks: [{ id: 1, subject: "A", status: "completed" }],
+				nextId: 2,
+				error: "illegal transition completed → in_progress",
+			},
+		};
+		const lines = renderTodoResult(result, plainTheme()).render(200).join("\n");
+		assert.match(lines, /✗/);
+		assert.match(lines, /illegal transition/);
+		// Отклонённый переход не должен показать целевой статус «в работе» как успех.
+		assert.equal(lines.includes("в работе"), false);
+	});
+
+	it("успешный create → статус последней задачи", () => {
+		const result = {
+			details: {
+				action: "create",
+				params: {},
+				tasks: [{ id: 1, subject: "A", status: "pending" }],
+				nextId: 2,
+			},
+		};
+		const lines = renderTodoResult(result, plainTheme()).render(200).join("\n");
+		assert.match(lines, /ожидание/);
 	});
 });

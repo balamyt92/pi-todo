@@ -214,6 +214,12 @@ export function renderTodoCall(
 /** Тело `renderResult`: эхо статуса операции. */
 export function renderTodoResult(result: { details?: unknown }, theme: Theme): Text {
 	const details = result.details as TaskDetails | undefined;
+	// Ошибка редьюсера: не показываем статус, вычисленный из неизменённого
+	// состояния. Для отклонённого update с params.status это был бы ЦЕЛЕВОЙ
+	// статус, как будто переход прошёл. Рисуем ошибку явно.
+	if (details?.error) {
+		return new Text(theme.fg("error", `✗ ${details.error}`), 0, 0);
+	}
 	let status: TaskStatus | undefined;
 	if (details) {
 		const params = details.params as TaskMutationParams;
