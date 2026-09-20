@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
 	selectAllCompleted,
 	selectCurrentTask,
+	selectEffectiveState,
 	selectOverlayLayout,
 	selectShowTaskIds,
 	selectTasksByStatus,
@@ -132,5 +133,62 @@ describe("selectTasksByStatus", () => {
 		assert.equal(g.pending.length, 1);
 		assert.equal(g.completed.length, 1);
 		assert.equal(g.inProgress.length, 1);
+	});
+});
+
+describe("selectEffectiveState — толерантность к висячим blockedBy (F8)", () => {
+	it("вычёркивает ссылку на удалённую задачу", () => {
+		const s = tasks(
+			{ status: "deleted" },
+			{ status: "pending", blockedBy: [1] },
+		);
+		assert.equal(selectEffectiveState(s).tasks[1]!.blockedBy, undefined);
+	});
+
+	it("живую зависимость сохраняет, из смешанной уходит только tombstone", () => {
+		const s = tasks(
+			{ status: "pending" },
+			{ status: "deleted" },
+			{ status: "pending", blockedBy: [1, 2] },
+		);
+		assert.deepEqual(selectEffectiveState(s).tasks[2]!.blockedBy, [1]);
+	});
+
+	it("без удалённых задач возвращает тот же объект — нет лишней аллокации", () => {
+		const s = tasks({ status: "pending" }, { status: "in_progress", blockedBy: [1] });
+		assert.equal(selectEffectiveState(s), s);
+	});
+
+	it("удалённые есть, но ссылок на них нет — тоже тот же объект", () => {
+		const s = tasks({ status: "deleted" }, { status: "pending" });
+		assert.equal(selectEffectiveState(s), s);
+	});
+
+	it("исходное состояние не мутируется", () => {
+		const s = tasks({ status: "deleted" }, { status: "pending", blockedBy: [1] });
+		const original = s.tasks[1]!.blockedBy;
+		selectEffectiveState(s);
+		assert.equal(s.tasks[1]!.blockedBy, original, "тот же экземпляр массива, не тронутый");
+		assert.deepEqual(s.tasks[1]!.blockedBy, [1]);
+	});
+
+	it("различает: без нормализации текущая #3, с нормализацией — #2", () => {
+		// #2 заблокирована на удалённую #1. В сыром состоянии она проходит как
+		// занятая, и «первая pending без блокировок» — это #3. После
+		// нормализации #2 разблокирована и идёт раньше.
+		const s = tasks(
+			{ status: "deleted" },
+			{ status: "pending", blockedBy: [1] },
+			{ status: "pending" },
+		);
+		assert.equal(selectCurrentTask(s)?.id, 3, "сырое состояние: висячая ссылка мешает");
+		assert.equal(selectCurrentTask(selectEffectiveState(s))?.id, 2, "нормализация снимает помеху");
+	});
+
+	it("selectShowTaskIds не требует id из-за висячей ссылки", () => {
+		// Единственная блокировка ведёт на tombstone — показывать #id незачем.
+		const s = tasks({ status: "deleted" }, { status: "pending", blockedBy: [1] });
+		assert.equal(selectShowTaskIds(s), true, "в сыром состоянии шум есть");
+		assert.equal(selectShowTaskIds(selectEffectiveState(s)), false, "в нормализованном шума нет");
 	});
 });

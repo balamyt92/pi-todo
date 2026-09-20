@@ -17,7 +17,7 @@ import type { Task, TaskAction, TaskMutationParams, TaskState, TaskStatus } from
 export type Op =
 	| { kind: "create"; taskId: number }
 	| { kind: "update"; id: number; fromStatus: TaskStatus; toStatus: TaskStatus }
-	| { kind: "delete"; id: number; subject: string }
+	| { kind: "delete"; id: number; subject: string; unblocked: number[] }
 	| { kind: "list"; statusFilter?: TaskStatus; includeDeleted: boolean }
 	| { kind: "get"; task: Task }
 	| { kind: "clear"; count: number }
@@ -30,6 +30,21 @@ export interface ApplyResult {
 
 function errorResult(state: TaskState, message: string): ApplyResult {
 	return { state, op: { kind: "error", message } };
+}
+
+/**
+ * Снять с задачи `task` блокировку от `depId`.
+ *
+ * Возвращает исходный объект, если снимать нечего, — каскад не плодит
+ * копии всей задачи на ровном месте.
+ */
+function stripBlocker(task: Task, depId: number): Task {
+	if (!task.blockedBy?.includes(depId)) return task;
+	const kept = task.blockedBy.filter((id) => id !== depId);
+	const copy: Task = { ...task };
+	if (kept.length > 0) copy.blockedBy = kept;
+	else delete copy.blockedBy;
+	return copy;
 }
 
 export function applyTaskMutation(state: TaskState, action: TaskAction, params: TaskMutationParams): ApplyResult {
@@ -165,11 +180,29 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			const current = state.tasks[idx];
 			if (current.status === "deleted") return errorResult(state, `#${current.id} is already deleted`);
 			const updated: Task = { ...current, status: "deleted" };
-			const newTasks = [...state.tasks];
-			newTasks[idx] = updated;
+
+			// Каскад F8: входящие `blockedBy` на удаляемую задачу снимаем.
+			//
+			// Без этого delete противоречит собственным запретам редьюсера:
+			// `create` (:45) и `addBlockedBy` (:107) отказываются ссылаться на
+			// удалённую задачу, но уже существующая ссылка на неё остаётся
+			// навсегда. Практика проверена живьём: удаление #8 оставило
+			// `blockedBy: #8` у #9, и `selectCurrentTask` перестал считать её
+			// разблокированной, хотя блокировщик исчез.
+			//
+			// Снимаем со ВСЕХ остальных задач, не только с видимых: tombstone
+			// может стоять в списке, а ссылка на него быть у кого угодно.
+			const unblocked: number[] = [];
+			const newTasks = state.tasks.map((t) => {
+				if (t.id === current.id) return updated;
+				const stripped = stripBlocker(t, current.id);
+				if (stripped !== t) unblocked.push(t.id);
+				return stripped;
+			});
+
 			return {
 				state: { tasks: newTasks, nextId: state.nextId },
-				op: { kind: "delete", id: updated.id, subject: updated.subject },
+				op: { kind: "delete", id: updated.id, subject: updated.subject, unblocked },
 			};
 		}
 

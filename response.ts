@@ -7,6 +7,7 @@
 
 import { deriveBlocks } from "./graph.ts";
 import type { Op } from "./reducer.ts";
+import { selectEffectiveState } from "./selectors.ts";
 import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskState } from "./types.ts";
 
 /** Одна строка: `[status] #id subject [(activeForm)] [⛓ #dep,…]`. */
@@ -36,7 +37,10 @@ function formatGetLines(task: Task, state: TaskState): string {
 }
 
 /** Чистый форматтер `(op, state) → string` с полным разбором `op.kind`. */
-export function formatContent(op: Op, state: TaskState): string {
+export function formatContent(op: Op, rawState: TaskState): string {
+	// F8: ответ модели строится по нормализованному состоянию — висячие
+	// `blockedBy` на удалённые задачи в него не попадают.
+	const state = selectEffectiveState(rawState);
 	switch (op.kind) {
 		case "create": {
 			const t = state.tasks.find((x) => x.id === op.taskId);
@@ -47,8 +51,13 @@ export function formatContent(op: Op, state: TaskState): string {
 			const transition = op.fromStatus !== op.toStatus ? ` (${op.fromStatus} → ${op.toStatus})` : "";
 			return `Updated #${op.id}${transition}`;
 		}
-		case "delete":
-			return `Deleted #${op.id}: ${op.subject}`;
+		case "delete": {
+			const unblocked =
+				op.unblocked.length > 0
+					? ` (removed as blocker for ${op.unblocked.map((id) => `#${id}`).join(", ")})`
+					: "";
+			return `Deleted #${op.id}: ${op.subject}${unblocked}`;
+		}
 		case "clear":
 			return `Cleared ${op.count} tasks`;
 		case "list": {
@@ -57,8 +66,12 @@ export function formatContent(op: Op, state: TaskState): string {
 			if (op.statusFilter) view = view.filter((t) => t.status === op.statusFilter);
 			return view.length === 0 ? "No tasks" : view.map(formatListLine).join("\n");
 		}
-		case "get":
-			return formatGetLines(op.task, state);
+		case "get": {
+			// op.task захвачен редьюсером из канонического состояния; берём
+			// нормализованный вариант по id, чтобы `blockedBy` в выводе был чистый.
+			const task = state.tasks.find((t) => t.id === op.task.id) ?? op.task;
+			return formatGetLines(task, state);
+		}
 		case "error":
 			return `Error: ${op.message}`;
 	}

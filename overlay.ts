@@ -24,6 +24,7 @@ import { getUiState } from "./store.ts";
 import {
 	selectAllCompleted,
 	selectCurrentTask,
+	selectEffectiveState,
 	selectHasActive,
 	selectOverlayLayout,
 	selectShowTaskIds,
@@ -196,9 +197,15 @@ export class TodoOverlay {
 	 * Снимок состояния + самоочищение дисплейных множеств: если состояние
 	 * откатилось назад (пересоздание id), дисплейная история невалидна.
 	 */
-	/** Чистый снимок UI-состояния для отрисовки. Без мутаций. */
+	/**
+	 * Чистый снимок UI-состояния для отрисовки. Без мутаций.
+	 *
+	 * Прогоняется через `selectEffectiveState`, чтобы висячие `blockedBy` на
+	 * удалённые задачи не влияли на «текущую задачу» и отрисовку блокировок
+	 * (F8, читающая сторона).
+	 */
 	private getSnapshot(): TaskState {
-		const state = getUiState();
+		const state = selectEffectiveState(getUiState());
 		return { tasks: [...state.tasks], nextId: state.nextId };
 	}
 

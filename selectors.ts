@@ -13,6 +13,41 @@ export function selectVisibleTasks(state: TaskState): readonly Task[] {
 	return state.tasks.filter((t) => t.status !== "deleted");
 }
 
+/**
+ * Нормализованное представление состояния: из `blockedBy` всех задач
+ * вычёркнуты ссылки на удалённые задачи (F8, читающая сторона).
+ *
+ * Зачем он нужен, если `delete` уже делает каскад. Каскад предотвращает
+ * НОВЫЕ висячие ссылки, но не лечит уже накопленные: в сессиях, записанных
+ * до этого фикса, `blockedBy` на tombstone остаётся после replay, и
+ * `selectCurrentTask` продолжает считать такую задачу заблокированной.
+ * Нормализация на границе чтения терпит и старые данные, и новые.
+ *
+ * Возвращает ТОТ ЖЕ объект, когда вычёркивать нечего — в нормальном потоке
+ * (каскад уже отработал) аллокации нет.
+ */
+export function selectEffectiveState(state: TaskState): TaskState {
+	const deleted = new Set<number>();
+	for (const t of state.tasks) {
+		if (t.status === "deleted") deleted.add(t.id);
+	}
+	if (deleted.size === 0) return state;
+
+	let changed = false;
+	const tasks = state.tasks.map((t) => {
+		if (!t.blockedBy?.length) return t;
+		const kept = t.blockedBy.filter((id) => !deleted.has(id));
+		if (kept.length === t.blockedBy.length) return t;
+		changed = true;
+		const copy: Task = { ...t };
+		if (kept.length > 0) copy.blockedBy = kept;
+		else delete copy.blockedBy;
+		return copy;
+	});
+
+	return changed ? { tasks, nextId: state.nextId } : state;
+}
+
 export interface TasksByStatus {
 	pending: readonly Task[];
 	inProgress: readonly Task[];

@@ -9,7 +9,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { formatCommandTaskLine, formatStatusLabel } from "./format.ts";
 import type { TodoOverlay, ViewMode } from "./overlay.ts";
-import { selectTasksByStatus, selectTodoCounts, selectVisibleTasks } from "./selectors.ts";
+import { selectEffectiveState, selectTasksByStatus, selectTodoCounts, selectVisibleTasks } from "./selectors.ts";
 import { getState } from "./store.ts";
 import { LIST_COMMAND_NAME, TOGGLE_COMMAND_NAME } from "./types.ts";
 
@@ -29,7 +29,7 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 				ctx.ui.notify(MSG_REQUIRES_UI, "error");
 				return;
 			}
-			const state = getState(ctx.sessionManager.getSessionId());
+			const state = selectEffectiveState(getState(ctx.sessionManager.getSessionId()));
 			const visible = selectVisibleTasks(state);
 			if (visible.length === 0) {
 				ctx.ui.notify(MSG_NO_TODOS, "info");

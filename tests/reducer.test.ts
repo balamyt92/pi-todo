@@ -120,3 +120,53 @@ describe("delete / clear", () => {
 		assert.equal(res.state.nextId, 1);
 	});
 });
+
+describe("delete: каскад входящих blockedBy (F8)", () => {
+	/** #2 и #3 заблокированы на #1; у #3 ещё живая зависимость от #4. */
+	function withInbound(): TaskState {
+		return {
+			tasks: [
+				{ id: 1, subject: "Блокировщик", status: "pending" },
+				{ id: 2, subject: "Ждёт #1", status: "pending", blockedBy: [1] },
+				{ id: 3, subject: "Ждёт #1 и #4", status: "pending", blockedBy: [1, 4] },
+				{ id: 4, subject: "Свободна", status: "pending" },
+			],
+			nextId: 5,
+		};
+	}
+
+	it("удаление снимает id из blockedBy у всех остальных", () => {
+		const res = applyTaskMutation(withInbound(), "delete", { id: 1 });
+		assert.equal(res.op.kind, "delete");
+		assert.equal(res.state.tasks.find((t) => t.id === 2)!.blockedBy, undefined);
+		assert.deepEqual(res.state.tasks.find((t) => t.id === 3)!.blockedBy, [4]);
+	});
+
+	it("op.unblocked перечисляет разблокированные", () => {
+		const res = applyTaskMutation(withInbound(), "delete", { id: 1 });
+		assert.equal(res.op.kind, "delete");
+		assert.deepEqual(res.op.unblocked, [2, 3]);
+	});
+
+	it("удаление без входящих ссылок даёт пустой unblocked", () => {
+		// У #2 никто не ссылается — каскаду снимать нечего.
+		const res = applyTaskMutation(withInbound(), "delete", { id: 2 });
+		assert.equal(res.op.kind, "delete");
+		assert.deepEqual(res.op.unblocked, []);
+	});
+
+	it("каскад не мутирует исходное состояние", () => {
+		const before = withInbound();
+		const t2Ref = before.tasks[1]!.blockedBy;
+		applyTaskMutation(before, "delete", { id: 1 });
+		assert.equal(before.tasks[1]!.blockedBy, t2Ref, "тот же экземпляр массива");
+		assert.deepEqual(before.tasks[1]!.blockedBy, [1], "и содержимое целое");
+	});
+
+	it("задача остаётся заблокированной живой зависимостью после каскада", () => {
+		// Удаляем #4 — у #3 должна остаться зависимость от #1.
+		const res = applyTaskMutation(withInbound(), "delete", { id: 4 });
+		assert.deepEqual(res.state.tasks.find((t) => t.id === 3)!.blockedBy, [1]);
+		assert.deepEqual(res.op.kind === "delete" ? res.op.unblocked : [], [3]);
+	});
+});
