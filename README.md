@@ -35,7 +35,7 @@ pi install git:git@github.com:balamyt92/pi-todo
 версия — ставьте с тегом:
 
 ```bash
-pi install git:github.com/balamyt92/pi-todo@v1.1.0
+pi install git:github.com/balamyt92/pi-todo@v1.2.1
 ```
 
 Запиненный ref обновления не сдвигают — для перехода на новую версию
