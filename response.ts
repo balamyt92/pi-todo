@@ -6,7 +6,6 @@
  */
 
 import { deriveBlocks } from "./graph.ts";
-import { formatStatusLabel } from "./format.ts";
 import type { Op } from "./reducer.ts";
 import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskState } from "./types.ts";
 

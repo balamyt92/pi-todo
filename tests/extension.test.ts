@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { __resetState, commitState, getState, getUiSessionId, getUiState } from "../store.ts";
+import { __resetState, commitState, getState, getUiSessionId, getUiState, setUiSession } from "../store.ts";
 import { LIST_COMMAND_NAME, TOGGLE_COMMAND_NAME, TOGGLE_SHORTCUT, TOOL_NAME } from "../types.ts";
 
 type Handler = (event: any, ctx: any) => Promise<void>;
@@ -295,5 +295,59 @@ describe("регрессия: изоляция состояний по сесс�
 			fakeSession("resumed", [todoEntry(1, "Восстановленная", "pending")], true).ctx,
 		);
 		assert.equal(getUiState().tasks.length, 1);
+	});
+});
+
+describe("регрессия: renderCall рисует свою сессию (F1)", () => {
+	/** Тема-заглушка без ANSI — только склейка текста. */
+	const theme = {
+		fg: (_color: string, text: string) => text,
+		bold: (text: string) => text,
+		strikethrough: (text: string) => text,
+	} as any;
+
+	function renderCall(rec: any, args: Record<string, unknown>): string {
+		return rec.toolDefs.get(TOOL_NAME)!.renderCall(args, theme, {}).render(200).join("\n");
+	}
+
+	it("дочерняя сессия подставляет свою тему задачи, а не тему UI-сессии", async () => {
+		__resetState();
+		const rec = await load();
+		// UI принадлежит родителю, у которого задача #1 называется иначе.
+		commitState("parent", { tasks: [{ id: 1, subject: "Родительская", status: "pending" }], nextId: 2 });
+		setUiSession("parent");
+
+		// Этот рантайм — дочерняя сессия без UI.
+		await rec.handlers.get("session_start")!({ reason: "startup" }, fakeSession("child").ctx);
+		commitState("child", { tasks: [{ id: 1, subject: "Детская", status: "pending" }], nextId: 2 });
+
+		const text = renderCall(rec, { action: "get", id: 1 });
+		assert.match(text, /Детская/, `должна быть тема своей сессии: ${text}`);
+		assert.doesNotMatch(text, /Родительская/, "тема UI-сессии подставлена не быть");
+	});
+
+	it("до session_start renderCall не подставляет чужие темы", async () => {
+		__resetState();
+		const rec = await load();
+		commitState("parent", { tasks: [{ id: 1, subject: "Родительская", status: "pending" }], nextId: 2 });
+		setUiSession("parent");
+
+		// Своя сессия ещё не известна → пустое состояние, чужая тема не попадает.
+		const text = renderCall(rec, { action: "get", id: 1 });
+		assert.doesNotMatch(text, /Родительская/);
+	});
+
+	it("update подставляет subject из своего состояния, а не из UI-сессии", async () => {
+		__resetState();
+		const rec = await load();
+		commitState("parent", { tasks: [{ id: 7, subject: "Родительская семёрка", status: "pending" }], nextId: 8 });
+		setUiSession("parent");
+		await rec.handlers.get("session_start")!({ reason: "startup" }, fakeSession("child").ctx);
+		commitState("child", { tasks: [{ id: 7, subject: "Детская семёрка", status: "pending" }], nextId: 8 });
+
+		// update читает состояние ради подписи темы — тот же путь, что и get.
+		const text = renderCall(rec, { action: "update", id: 7, status: "in_progress" });
+		assert.match(text, /Детская семёрка/, `должна быть тема своей сессии: ${text}`);
+		assert.doesNotMatch(text, /Родительская/);
 	});
 });

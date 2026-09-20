@@ -38,7 +38,24 @@ import { TOGGLE_SHORTCUT, TOOL_NAME } from "./types.ts";
 export default function (pi: ExtensionAPI) {
 	const overlay = new TodoOverlay();
 
-	registerTodoTool(pi);
+	/**
+	 * Сессия этого рантайма.
+	 *
+	 * Factory перезапускается на каждую ЗАГРУЗКУ расширений — создание сессии,
+	 * `/reload`, спавн субагента со своим resource loader. Это вызов
+	 * `loadExtensionsCached` в `resource-loader.js`, а НЕ `bindExtensions`
+	 * (последний только проставляет UI-context и эмиттит `session_start`,
+	 * factory не трогает). Переходы `/new`/`/resume`/`/fork` дают свежее
+	 * замыкание: по docs/extensions.md за ними следует `session_shutdown` →
+	 * перезагрузка ресурсов → `session_start`.
+	 *
+	 * Итог: переменная принадлежит ровно одной сессии. Нужна для `renderCall`,
+	 * который не получает `ctx` и иначе не мог бы отличить свой список от
+	 * списка UI-сессии.
+	 */
+	let ownSessionId: string | undefined;
+
+	registerTodoTool(pi, () => ownSessionId);
 	registerTodoCommands(pi, overlay);
 
 	pi.registerShortcut(TOGGLE_SHORTCUT, {
@@ -53,6 +70,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		const sid = ctx.sessionManager.getSessionId();
+		ownSessionId = sid;
 		replaceState(sid, replayFromBranch(ctx));
 		if (ctx.hasUI) {
 			setUiSession(sid);

@@ -135,3 +135,63 @@ describe("пустой список", () => {
 		assert.equal(getLast(), undefined);
 	});
 });
+
+describe("скрытие выполненных: асимметрия режимов (F7)", () => {
+	/**
+	 * Скрытие строится на том, что было ПОКАЗАНО. Трекинг живёт в
+	 * `renderExpanded()`, поэтому тест обязан явно вызвать `render()` —
+	 * регистрация виджета через `setWidget` его не рисует.
+	 */
+	it("развёрнутый режим помечает показанные и скрывает их на следующем ходу", () => {
+		const { overlay, getComponent } = overlayWith(["completed", "pending"]);
+		assert.equal(overlay.getMode(), "expanded");
+
+		overlay.beginTurn(); // ход пользователя начался
+		getComponent()!.render(100); // выполненные показаны → затрекованы
+		overlay.endTurn(); // ход устаканился — скрытие вооружено
+		overlay.beginTurn(); // следующий ход
+
+		const text = getComponent()!.render(100).join("\n");
+		assert.ok(!text.includes("Задача 1"), `выполненная #1 должна скрыться: ${text}`);
+		assert.ok(text.includes("Задача 2"), `невыполненная осталась: ${text}`);
+	});
+
+	it("свёрнутый с самого начала режим НЕ помечает — счётчик прогресса цел", () => {
+		__resetState();
+		setUiSession(SESSION);
+		const { ui, getComponent } = fakeUI();
+		const overlay = new TodoOverlay();
+		overlay.setUICtx(ui);
+		commitState(SESSION, makeTasks(["completed", "pending"]));
+
+		overlay.setMode("collapsed"); // первый рендер сразу свёрнутый
+		getComponent()!.render(100);
+		overlay.endTurn();
+		overlay.beginTurn();
+
+		const lines = getComponent()!.render(100);
+		assert.equal(lines.length, 1, "свёрнутый режим — одна строка");
+		assert.ok(lines[0]!.includes("1/2"), `прогресс 1/2 не должен обнулиться: ${lines[0]}`);
+	});
+
+	it("ретрай внутри хода не скрывает ещё живые задачи", () => {
+		const { overlay, getComponent } = overlayWith(["completed", "pending"]);
+
+		overlay.beginTurn(); // ход начался
+		getComponent()!.render(100); // выполненные показаны и затрекованы
+		overlay.beginTurn(); // повторный agent_start БЕЗ agent_settled — это ретрай
+
+		const text = getComponent()!.render(100).join("\n");
+		assert.ok(text.includes("Задача 1"), `на ретрае выполненная должна остаться видна: ${text}`);
+	});
+
+	it("без реального показа за ход скрывать нечего", () => {
+		const { overlay, getComponent } = overlayWith(["completed", "pending"]);
+		// Ход прошёл, но виджет не рисовался — множество скрытия пусто.
+		overlay.beginTurn();
+		overlay.endTurn();
+		overlay.beginTurn();
+		const text = getComponent()!.render(100).join("\n");
+		assert.ok(text.includes("Задача 1"), `ничего не было показано → ничего не скрыто: ${text}`);
+	});
+});

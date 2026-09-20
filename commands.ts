@@ -7,7 +7,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { formatStatusLabel } from "./format.ts";
+import { formatCommandTaskLine, formatStatusLabel } from "./format.ts";
 import type { TodoOverlay, ViewMode } from "./overlay.ts";
 import { selectTasksByStatus, selectTodoCounts, selectVisibleTasks } from "./selectors.ts";
 import { getState } from "./store.ts";
@@ -19,18 +19,6 @@ const SECTION_COMPLETED = "── Выполнено ──";
 
 const MSG_NO_TODOS = "Задач пока нет. Попросите агента добавить!";
 const MSG_REQUIRES_UI = "Команда требует интерактивного режима";
-
-function commandLine(task: {
-	id: number;
-	subject: string;
-	status: string;
-	activeForm?: string;
-	blockedBy?: number[];
-}, glyph: string): string {
-	const form = task.status === "in_progress" && task.activeForm ? ` (${task.activeForm})` : "";
-	const block = task.blockedBy?.length ? `    ⛓ ${task.blockedBy.map((id) => `#${id}`).join(",")}` : "";
-	return `  ${glyph} #${task.id} ${task.subject}${form}${block}`;
-}
 
 /** `/todos` — список задач текущей ветки, сгруппированный по статусам. */
 export function registerTodosCommand(pi: ExtensionAPI): void {
@@ -58,15 +46,15 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 			const lines: string[] = [headerParts.join(" · ")];
 			if (groups.pending.length > 0) {
 				lines.push(SECTION_PENDING);
-				for (const task of groups.pending) lines.push(commandLine(task, "○"));
+				for (const task of groups.pending) lines.push(formatCommandTaskLine(task, "○"));
 			}
 			if (groups.inProgress.length > 0) {
 				lines.push(SECTION_IN_PROGRESS);
-				for (const task of groups.inProgress) lines.push(commandLine(task, "◐"));
+				for (const task of groups.inProgress) lines.push(formatCommandTaskLine(task, "◐"));
 			}
 			if (groups.completed.length > 0) {
 				lines.push(SECTION_COMPLETED);
-				for (const task of groups.completed) lines.push(commandLine(task, "✓"));
+				for (const task of groups.completed) lines.push(formatCommandTaskLine(task, "✓"));
 			}
 			ctx.ui.notify(lines.join("\n"), "info");
 		},

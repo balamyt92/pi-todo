@@ -10,7 +10,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { selectTaskSubjectById, type TodoCounts } from "./selectors.ts";
-import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskStatus } from "./types.ts";
+import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskState, TaskStatus } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Подписи статусов (рус.)
@@ -195,7 +195,7 @@ export function formatCollapsedLine(
 export function renderTodoCall(
 	args: TaskMutationParams & { action: TaskAction },
 	theme: Theme,
-	state: { tasks: Task[]; nextId: number },
+	state: TaskState,
 ): Text {
 	const glyph = ACTION_GLYPH[args.action] ?? args.action;
 	let text = theme.fg("toolTitle", theme.bold("todo ")) + theme.fg("muted", glyph);
